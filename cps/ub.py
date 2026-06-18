@@ -318,6 +318,9 @@ class OAuthProvider(Base):
     oauth_token_url = Column(String, default=None)
     oauth_userinfo_url = Column(String, default=None)
     oauth_admin_group = Column(String, default=None)
+    oauth_group_claim = Column(String, default='groups')
+    oauth_allowed_groups = Column(String, default=None)
+    oauth_require_group = Column(Boolean, default=False)
     metadata_url = Column(String, default=None)  # For OIDC auto-discovery
     scope = Column(String, default="openid profile email")  # Customizable OAuth scopes
     username_mapper = Column(String, default="preferred_username")  # JWT field for username
@@ -1449,6 +1452,22 @@ def migrate_user_table(engine, _session):
             print(f"[cover-preview-migration] Could not back-fill show_ereader_previews=0 for existing users: {e}", flush=True)
             _session.rollback()
 
+    # Add OAuth access-control fields
+    try:
+        _session.query(exists().where(OAuthProvider.oauth_group_claim)).scalar()
+        _session.commit()
+    except exc.OperationalError:
+        _safe_session_rollback(_session, "oauthProvider.oauth_group_claim")
+        _run_ddl_with_retry(
+            engine,
+            [
+                "ALTER TABLE oauthProvider ADD column 'oauth_group_claim' String DEFAULT 'groups'",
+                "ALTER TABLE oauthProvider ADD column 'oauth_allowed_groups' String DEFAULT NULL",
+                "ALTER TABLE oauthProvider ADD column 'oauth_require_group' Boolean DEFAULT 0",
+            ],
+        )
+
+    # Add new OAuth enhancement fields
     try:
         _session.query(exists().where(User.preview_preset)).scalar()
         _session.commit()
